@@ -3,7 +3,8 @@
     "allow": [
       "Bash(git --version)",
       "Bash(brew install *)",
-      "Bash(grep -n 'homebrew\\\\|PATH' ~/.zshrc | head -20)"
+      "Bash(grep -n 'homebrew\\\\|PATH' ~/.zshrc | head -20)",
+      "Bash(xargs ls -la)"
     ]
   }
 }

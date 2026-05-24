@@ -8,11 +8,17 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
 
+import java.util.function.Function;
+
 public class BubbleItem extends Circle {
     private static final double BUBBLE_RADIUS = 22;
     private Text text;
 
     public BubbleItem(double cx, double cy, String label, String color) {
+        this.setCenterX(cx);          // tell the circle where it is
+        this.setCenterY(cy);          // ↑
+        this.setRadius(BUBBLE_RADIUS); // give it a size
+
         this.setFill(Color.web(color));
         this.setOpacity(0);
         this.setScaleX(0);
@@ -29,11 +35,16 @@ public class BubbleItem extends Circle {
         text.setY(cy + BUBBLE_RADIUS + 12);
 
         if (label.equals("Notes")) {
-            this.setOnMouseClicked(e -> {
+            this.setOnMouseClicked((e) -> {
 //                toggleMenu();
                 new NotesView().show();
             });
         }
+    }
+
+    // Add a getter so callers can add the text to the pane
+    public Text getText() {
+        return text;
     }
 
     public Circle getCircle() {

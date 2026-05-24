@@ -39,7 +39,7 @@ public class AnimationHelper {
         fadeCircle.setToValue(show ? 1 : 0);
 
         // Label fades in slightly after the circle so the circle appears first
-        FadeTransition fadeLabel = new FadeTransition(Duration.millis(200), bubble);
+        FadeTransition fadeLabel = new FadeTransition(Duration.millis(200), bubble.getText());
         fadeLabel.setDelay(show ? delay.add(Duration.millis(100)) : delay);
         fadeLabel.setToValue(show ? 1 : 0);
 

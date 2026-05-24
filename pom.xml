@@ -29,7 +29,7 @@
                 <artifactId>javafx-maven-plugin</artifactId>
                 <version>0.0.8</version>
                 <configuration>
-                    <mainClass>com.jirahourlogger.App</mainClass>
+                    <mainClass>com.jirahourlogger.Launcher</mainClass>
                 </configuration>
             </plugin>
         </plugins>

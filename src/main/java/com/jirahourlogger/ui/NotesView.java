@@ -1,5 +1,6 @@
 package com.jirahourlogger.ui;
 
+import com.jirahourlogger.helper.StageHelper;
 import com.jirahourlogger.model.Note;
 import com.jirahourlogger.storage.NotesManager;
 import javafx.geometry.Insets;
@@ -12,7 +13,6 @@ import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
-import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 
 import java.io.File;
@@ -45,21 +45,12 @@ public class NotesView {
     // We keep a reference to the notes list so we can refresh it after adding/deleting
     private VBox notesList;
 
-    // We keep the Stage reference so the close button can dismiss this window
-    private Stage stage;
+    private final StageHelper stageHelper = new StageHelper();
 
-    /**
-     * Builds and displays the notes window.
-     */
     public void show() {
-        stage = new Stage();
-
-        // UNDECORATED removes the macOS window titlebar/chrome.
-        // We draw our own title bar so we control its look.
-        stage.initStyle(StageStyle.UNDECORATED);
-
-        // Keep this window above other apps (same as the sphere)
-        stage.setAlwaysOnTop(true);
+        stageHelper
+                .initStyle(StageStyle.UNDECORATED)
+                .setAlwaysOnTop(true);
 
         // VBox is a vertical stack. 16 = 16px gap between each child.
         VBox root = new VBox(16);
@@ -86,20 +77,17 @@ public class NotesView {
         // corner when the drag starts, then use it to reposition the window.
         final double[] dragDelta = {0, 0};
         titleBar.setOnMousePressed(e -> {
-            dragDelta[0] = stage.getX() - e.getScreenX();
-            dragDelta[1] = stage.getY() - e.getScreenY();
+            dragDelta[0] = stageHelper.getX() - e.getScreenX();
+            dragDelta[1] = stageHelper.getY() - e.getScreenY();
         });
         titleBar.setOnMouseDragged(e -> {
-            stage.setX(e.getScreenX() + dragDelta[0]);
-            stage.setY(e.getScreenY() + dragDelta[1]);
+            stageHelper.setX(e.getScreenX() + dragDelta[0]);
+            stageHelper.setY(e.getScreenY() + dragDelta[1]);
         });
 
-        // Color.web("#1E1E2E") = the same dark colour as the root background,
-        // so there's no visible border between the scene fill and the root pane.
         Scene scene = new Scene(root, 380, 520);
         scene.setFill(Color.web("#1E1E2E"));
-        stage.setScene(scene);
-        stage.show();
+        stageHelper.setScene(scene).show();
     }
 
     /**
@@ -117,7 +105,7 @@ public class NotesView {
         close.setTextFill(Color.web("#888888"));
         close.setFont(Font.font(14));
         close.setStyle("-fx-cursor: hand;");
-        close.setOnMouseClicked(e -> stage.close()); // close the window when clicked
+        close.setOnMouseClicked(e -> stageHelper.close());
 
         HBox bar = new HBox(header);
         HBox.setHgrow(header, Priority.ALWAYS); // header takes all available space

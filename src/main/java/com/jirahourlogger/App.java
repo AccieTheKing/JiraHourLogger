@@ -1,6 +1,6 @@
 package com.jirahourlogger;
 
-import com.jirahourlogger.ui.FloatingSphere;
+import com.jirahourlogger.ui.MainFloatingSphere;
 import javafx.application.Application;
 import javafx.stage.Stage;
 
@@ -34,7 +34,7 @@ public class App extends Application {
         primaryStage.hide();
 
         // Create and show our custom floating sphere on the desktop
-        new FloatingSphere().show();
+        new MainFloatingSphere().show();
     }
 
     /**

@@ -26,8 +26,9 @@ public class MainFloatingSphere {
     private final AnimationHelper animationHelper;
     private final SphereHelper sphereHelper;
 
-    private boolean menuOpen = false;
-    private boolean dragging = false;
+    private boolean menuOpen    = false;
+    private boolean dragging    = false;
+    private boolean isAnimating = false; // guard against overlapping toggleMenu calls
     private double dragOffsetX, dragOffsetY;
 
     /**
@@ -95,6 +96,9 @@ public class MainFloatingSphere {
      *   • stage width / height      — the actual window resize
      */
     private void toggleMenu() {
+        // Ignore rapid clicks while a resize/bubble animation is already running
+        if (isAnimating) return;
+        isAnimating = true;
         menuOpen = !menuOpen;
 
         double fromPos  = menuOpen ? SphereHelper.SPHERE_INITIAL_POS  : SphereHelper.SPHERE_EXPANDED_POS;
@@ -129,6 +133,7 @@ public class MainFloatingSphere {
                 new KeyFrame(Duration.millis(resizeDuration), new KeyValue(progress, 1.0, Interpolator.EASE_BOTH))
         );
         resize.setDelay(Duration.millis(resizeDelay));
+        resize.setOnFinished(e -> isAnimating = false); // allow the next click once animation completes
         resize.play();
 
         for (int i = 0; i < bubblesLeaves.size(); i++) {

@@ -26,7 +26,12 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * NotesView is the window that opens when the user clicks the "Notes" bubble.
@@ -138,24 +143,29 @@ public class NotesView {
     /**
      * Entry point for the submit flow.
      *
-     * Collects all log entries across all notes into two parallel lists:
-     *   entries — the LogEntry objects to process
-     *   dates   — the work date for each entry (parsed from its note's "Date:" line)
+     * Collects all log entries across all notes into flat lists while also
+     * building a map from entry index → source Note. This lets the completion
+     * callback determine which notes are safe to delete after partial failures,
+     * preventing already-logged entries from being re-posted on retry.
      *
-     * Parallel lists keep the code simple: processEntryAt only needs one index
-     * to look up both the entry and its date.
+     * successfulIndices tracks which entry positions were successfully logged
+     * so the onComplete callback can delete only those notes.
      */
     private void submitAllNotes() {
         List<Note> notes = notesManager.loadNotes();
 
-        List<LogEntry> entries = new ArrayList<>();
-        List<LocalDate> dates  = new ArrayList<>();
+        List<LogEntry> entries            = new ArrayList<>();
+        List<LocalDate> dates             = new ArrayList<>();
+        Map<Integer, Note> entryIndexToNote = new HashMap<>();
+        Set<Integer> successfulIndices    = new HashSet<>();
 
+        int idx = 0;
         for (Note note : notes) {
             LocalDate date = note.getLoggedDate().orElse(LocalDate.now());
             for (LogEntry entry : note.getLogEntries()) {
                 entries.add(entry);
                 dates.add(date);
+                entryIndexToNote.put(idx++, note);
             }
         }
 
@@ -163,23 +173,53 @@ public class NotesView {
 
         LoggingProgressView progressView = new LoggingProgressView();
 
-        // On full success: write the worklog, wipe the note files, refresh the list, close the window
-        progressView.setOnSuccess(() -> new Thread(() -> {
-            try {
-                notesManager.writeWorklog(notes);
-                notesManager.deleteAllNotes();
-            } catch (IOException ex) {
-                ex.printStackTrace();
+        // onComplete fires after all entries are processed — on both full success
+        // and partial failure. On full success, every note is cleaned up and the
+        // window is closed. On partial failure, only notes whose entries all
+        // succeeded are written to the worklog and deleted; failed notes remain on
+        // disk so the user can retry without re-posting already-logged entries.
+        //
+        // Edge case: if a single note has a mix of successful and failed entries,
+        // that note is left on disk entirely (per-note granularity). The user would
+        // need to manually remove the already-logged lines before retrying.
+        progressView.setOnComplete(() -> {
+            boolean allSucceeded = successfulIndices.size() == entries.size();
+
+            List<Note> toProcess;
+            if (allSucceeded) {
+                // Full success — same as before, clean up everything
+                toProcess = new ArrayList<>(notes);
+            } else {
+                // Partial success — only clean up notes where every entry succeeded
+                toProcess = notes.stream()
+                        .filter(note -> !note.getLogEntries().isEmpty())
+                        .filter(note -> entryIndexToNote.entrySet().stream()
+                                .filter(e -> e.getValue() == note)
+                                .allMatch(e -> successfulIndices.contains(e.getKey())))
+                        .collect(Collectors.toList());
             }
-            Platform.runLater(() -> {
-                refreshNotesList();
-                stageHelper.close();
-            });
-        }).start());
+
+            new Thread(() -> {
+                try {
+                    if (!toProcess.isEmpty()) {
+                        notesManager.writeWorklog(toProcess);
+                        for (Note note : toProcess) notesManager.deleteNote(note);
+                    }
+                } catch (IOException ex) {
+                    ex.printStackTrace();
+                }
+                Platform.runLater(() -> {
+                    refreshNotesList();
+                    // Only close the NotesView window on full success; on partial
+                    // failure leave it open so the user can see what remains
+                    if (allSucceeded) stageHelper.close();
+                });
+            }).start();
+        });
 
         progressView.show(entries);
 
-        processEntryAt(new JiraClient(), entries, dates, 0, progressView);
+        processEntryAt(new JiraClient(), entries, dates, 0, progressView, successfulIndices);
     }
 
     /**
@@ -189,10 +229,15 @@ public class NotesView {
      *   1. Mark it RUNNING in the progress view
      *   2. Fetch its subtasks on a background thread (keeps UI responsive)
      *   3a. 0 or 1 subtask → log automatically, mark SUCCESS or ERROR
-     *   3b. 2+ subtasks     → show the picker; mark SUCCESS when it closes
+     *   3b. 2+ subtasks     → show the picker; the picker calls back with true (logged)
+     *                         or false (skipped) so we can mark accordingly
+     *
+     * successfulIndices is updated here (add currentIndex on success) so the
+     * onComplete callback in submitAllNotes can determine what to clean up.
      */
     private void processEntryAt(JiraClient client, List<LogEntry> entries,
-                                 List<LocalDate> dates, int index, LoggingProgressView view) {
+                                 List<LocalDate> dates, int index, LoggingProgressView view,
+                                 Set<Integer> successfulIndices) {
         if (index >= entries.size()) {
             view.markAllDone();
             return;
@@ -206,7 +251,7 @@ public class NotesView {
 
         view.markRunning(currentIndex);
 
-        Runnable next = () -> processEntryAt(client, entries, dates, currentIndex + 1, view);
+        Runnable next = () -> processEntryAt(client, entries, dates, currentIndex + 1, view, successfulIndices);
 
         new Thread(() -> {
             try {
@@ -214,9 +259,14 @@ public class NotesView {
 
                 Platform.runLater(() -> {
                     if (subtasks.size() > 1) {
-                        // Multiple choices — let the user pick, then mark success
-                        new SubtaskPickerView(entry, subtasks, date, client, () -> {
-                            view.markSuccess(currentIndex);
+                        // Multiple choices — show picker; callback receives true (logged) or false (skipped)
+                        new SubtaskPickerView(entry, subtasks, date, client, logged -> {
+                            if (logged) {
+                                successfulIndices.add(currentIndex);
+                                view.markSuccess(currentIndex);
+                            }
+                            // Skipped entries: status stays RUNNING in the progress view.
+                            // The entry is not written to Jira and not counted as success.
                             next.run();
                         }).show();
                     } else {
@@ -227,6 +277,7 @@ public class NotesView {
                                 client.logWork(targetKey, baseUrl, date,
                                         entry.timeRange().start(), entry.timeRange().end(),
                                         entry.description());
+                                successfulIndices.add(currentIndex);
                                 view.markSuccess(currentIndex);
                             } catch (Exception ex) {
                                 view.markError(currentIndex, ex.getMessage());

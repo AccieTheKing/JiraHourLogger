@@ -22,6 +22,7 @@ import javafx.stage.StageStyle;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * SubtaskPickerView shows a small window for a single LogEntry.
@@ -31,8 +32,9 @@ import java.util.List;
  *   - A list of subtasks the user can click to select
  *   - A "Log time" button that posts the worklog to the selected subtask
  *
- * When the worklog is posted (or skipped), `onComplete` is called so
- * NotesView can move on to the next entry.
+ * When the worklog is posted, `onComplete` is called with `true` (logged).
+ * When the user clicks "Skip", `onComplete` is called with `false` (skipped).
+ * This lets the caller distinguish between a logged entry and a skipped one.
  *
  * Modality.APPLICATION_MODAL blocks interaction with other windows while
  * this picker is open, so entries are handled one at a time.
@@ -43,12 +45,14 @@ public class SubtaskPickerView {
     private final List<JiraIssue> subtasks;
     private final LocalDate date;
     private final JiraClient jiraClient;
-    private final Runnable onComplete;  // called when this entry is done (logged or skipped)
+
+    // true = entry was logged to Jira, false = entry was skipped
+    private final Consumer<Boolean> onComplete;
 
     private JiraIssue selectedSubtask = null;
 
     public SubtaskPickerView(LogEntry entry, List<JiraIssue> subtasks,
-                             LocalDate date, JiraClient jiraClient, Runnable onComplete) {
+                             LocalDate date, JiraClient jiraClient, Consumer<Boolean> onComplete) {
         this.entry       = entry;
         this.subtasks    = subtasks;
         this.date        = date;
@@ -89,24 +93,10 @@ public class SubtaskPickerView {
             root.getChildren().add(descLabel);
         });
 
-        // --- Subtask list or fallback message ---
-        if (subtasks.isEmpty()) {
-            Label none = new Label("No subtasks found — time will be logged to " + parentKey);
-            none.setTextFill(Color.web("#888888"));
-            none.setWrapText(true);
-            root.getChildren().add(none);
-        } else {
-            Label pick = new Label("Select a subtask to log time to:");
-            pick.setTextFill(Color.web("#888888"));
-            pick.setFont(Font.font(12));
-            root.getChildren().add(pick);
-
-            for (JiraIssue subtask : subtasks) {
-                root.getChildren().add(buildSubtaskCard(subtask));
-            }
-        }
-
-        // --- Footer: status label + action buttons ---
+        // --- Footer controls declared early so subtask cards can reference logBtn ---
+        // The Log time button starts disabled when there are subtasks to choose from;
+        // clicking a subtask card enables it. When there are no subtasks at all,
+        // it stays enabled because the action (log to parent) needs no selection.
         Label statusLabel = new Label("");
         statusLabel.setTextFill(Color.web("#FF6B6B"));
         statusLabel.setFont(Font.font(11));
@@ -118,14 +108,37 @@ public class SubtaskPickerView {
         );
         logBtn.setOnAction(e -> handleLogTime(stage, statusLabel));
 
+        // --- Subtask list or fallback message ---
+        if (subtasks.isEmpty()) {
+            // No subtasks — log button logs to parent ticket; no selection needed
+            Label none = new Label("No subtasks found — time will be logged to " + parentKey);
+            none.setTextFill(Color.web("#888888"));
+            none.setWrapText(true);
+            root.getChildren().add(none);
+        } else {
+            // Subtasks exist — require an explicit selection before allowing log
+            logBtn.setDisable(true);
+
+            Label pick = new Label("Select a subtask to log time to:");
+            pick.setTextFill(Color.web("#888888"));
+            pick.setFont(Font.font(12));
+            root.getChildren().add(pick);
+
+            for (JiraIssue subtask : subtasks) {
+                root.getChildren().add(buildSubtaskCard(subtask, logBtn));
+            }
+        }
+
+        // --- Footer: status label + action buttons ---
         Button skipBtn = new Button("Skip");
         skipBtn.setStyle(
                 "-fx-background-color: #2A2A3E; -fx-text-fill: #888888; " +
                 "-fx-background-radius: 8; -fx-cursor: hand;"
         );
+        // Skip: notify caller that this entry was NOT logged (false = skipped)
         skipBtn.setOnAction(e -> {
             stage.close();
-            onComplete.run(); // move on to the next entry
+            onComplete.accept(false);
         });
 
         HBox buttons = new HBox(8, logBtn, skipBtn);
@@ -142,24 +155,35 @@ public class SubtaskPickerView {
 
     /**
      * Builds a clickable card for a single subtask.
-     * Clicking it selects the subtask (highlighted border) and deselects any previous selection.
+     *
+     * Each card is tagged with the "subtask-card" style class so the reset
+     * loop in the click handler can filter only subtask cards — not the footer
+     * HBox or any other HBox that happens to be in the same root VBox.
+     *
+     * Clicking the card selects the subtask, highlights it, and enables logBtn.
      */
-    private HBox buildSubtaskCard(JiraIssue subtask) {
+    private HBox buildSubtaskCard(JiraIssue subtask, Button logBtn) {
         HBox card = new HBox(10);
         card.setPadding(new Insets(10, 14, 10, 14));
         card.setAlignment(Pos.CENTER_LEFT);
         card.setStyle(cardStyle(false));
+        // Mark this node so the reset loop can identify subtask cards specifically
+        card.getStyleClass().add("subtask-card");
+
         card.setOnMouseClicked(e -> {
-            // Visually deselect all cards, then highlight this one
-            // We achieve this by storing the selected subtask and refreshing via the parent VBox
             selectedSubtask = subtask;
-            // Re-style: walk the parent VBox children to reset all cards, highlight this one
+
+            // Reset all subtask cards to unselected, then highlight this one.
+            // Filtering by "subtask-card" style class avoids restyling the footer HBox.
             if (card.getParent() instanceof VBox parent) {
                 parent.getChildren().stream()
-                        .filter(node -> node instanceof HBox)
+                        .filter(node -> node.getStyleClass().contains("subtask-card"))
                         .forEach(node -> node.setStyle(cardStyle(false)));
             }
             card.setStyle(cardStyle(true));
+
+            // A subtask is now selected — allow the user to log
+            logBtn.setDisable(false);
         });
 
         Label key = new Label(subtask.key());
@@ -180,7 +204,7 @@ public class SubtaskPickerView {
     /**
      * Called when the user clicks "Log time".
      * Runs the Jira API call on a background thread so the UI stays responsive,
-     * then closes the window and calls onComplete on the JavaFX thread.
+     * then closes the window and calls onComplete(true) on the JavaFX thread.
      */
     private void handleLogTime(Stage stage, Label statusLabel) {
         // Decide which key to log to — selected subtask, or parent if none
@@ -199,9 +223,10 @@ public class SubtaskPickerView {
                 jiraClient.logWork(targetKey, baseUrl, date,
                         entry.timeRange().start(), entry.timeRange().end(),
                         entry.description());
+                // true = entry was successfully logged
                 Platform.runLater(() -> {
                     stage.close();
-                    onComplete.run();
+                    onComplete.accept(true);
                 });
             } catch (Exception ex) {
                 Platform.runLater(() -> {

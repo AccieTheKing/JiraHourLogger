@@ -46,14 +46,18 @@ public class LoggingProgressView {
     private Stage stage;
     private Label titleLabel;
     private ScrollPane scroll;   // kept as field so markRunning() can auto-scroll
-    private Runnable onSuccess;  // called once after the window fades out (errors = 0 only)
+    // Called once all entries are processed — fires whether there were errors or not.
+    // On full success it runs after the window fades out; on partial failure it runs immediately.
+    private Runnable onComplete;
 
     /**
-     * Register a callback to run after everything logged successfully and the
-     * window has finished its fade-out.  Call this before show().
+     * Register a callback to run after all entries have been processed.
+     * Fires on both full success and partial failure so the caller can clean up
+     * whichever notes were successfully logged regardless of the overall outcome.
+     * Call this before show().
      */
-    public void setOnSuccess(Runnable callback) {
-        this.onSuccess = callback;
+    public void setOnComplete(Runnable callback) {
+        this.onComplete = callback;
     }
 
     /** Opens the window and shows all entries as PENDING. */
@@ -167,16 +171,18 @@ public class LoggingProgressView {
             if (errorCount > 0) {
                 titleLabel.setText("Done — " + errorCount + " error" + (errorCount > 1 ? "s" : ""));
                 titleLabel.setTextFill(Color.web("#FF6B6B"));
+                // Partial failure: fire immediately so the caller can clean up successful notes
+                if (onComplete != null) onComplete.run();
             } else {
                 titleLabel.setText("All done ✓");
                 titleLabel.setTextFill(Color.web("#4CAF50"));
-                // Auto-close after 2.5 s when everything went well, then notify the caller
+                // Full success: auto-close after 2.5 s, then fire so the caller can clean up
                 new Timeline(new KeyFrame(Duration.millis(2500), e -> {
                     FadeTransition fadeOut = new FadeTransition(Duration.millis(200), stage.getScene().getRoot());
                     fadeOut.setToValue(0);
                     fadeOut.setOnFinished(ev -> {
                         stage.close();
-                        if (onSuccess != null) onSuccess.run();
+                        if (onComplete != null) onComplete.run();
                     });
                     fadeOut.play();
                 })).play();

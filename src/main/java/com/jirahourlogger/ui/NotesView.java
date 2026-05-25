@@ -1,11 +1,16 @@
 package com.jirahourlogger.ui;
 
+import com.jirahourlogger.api.JiraClient;
 import com.jirahourlogger.helper.StageHelper;
+import com.jirahourlogger.model.JiraIssue;
+import com.jirahourlogger.model.LogEntry;
 import com.jirahourlogger.model.Note;
 import com.jirahourlogger.storage.NotesManager;
+import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
+import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.input.TransferMode;
@@ -13,32 +18,34 @@ import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import javafx.scene.text.Text;
 import javafx.stage.StageStyle;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * NotesView is the window that opens when the user clicks the "Notes" bubble.
- *
+ * <p>
  * It has three sections stacked vertically (VBox):
- *   1. Title bar   — "Notes" heading + a close button, also used to drag the window
- *   2. Drop zone   — a dashed rectangle where users drag & drop files
- *   3. Notes list  — a scrollable list of all saved notes, each with a delete button
- *
+ * 1. Title bar   — "Notes" heading + a close button, also used to drag the window
+ * 2. Drop zone   — a dashed rectangle where users drag & drop files
+ * 3. Notes list  — a scrollable list of all saved notes, each with a delete button
+ * <p>
  * KEY JAVAFX LAYOUT CLASSES USED:
- *
- *   VBox  — arranges children vertically (top to bottom), with a set spacing between them
- *   HBox  — arranges children horizontally (left to right)
- *   ScrollPane — wraps a node and adds a scrollbar when the content overflows
- *   Label — displays text (or an icon character)
- *   Insets — padding values (top, right, bottom, left)
- *   Pos   — alignment constants (e.g. Pos.CENTER_LEFT = vertically centred, left-aligned)
+ * <p>
+ * VBox  — arranges children vertically (top to bottom), with a set spacing between them
+ * HBox  — arranges children horizontally (left to right)
+ * ScrollPane — wraps a node and adds a scrollbar when the content overflows
+ * Label — displays text (or an icon character)
+ * Insets — padding values (top, right, bottom, left)
+ * Pos   — alignment constants (e.g. Pos.CENTER_LEFT = vertically centred, left-aligned)
  */
 public class NotesView {
-
     // NotesManager handles all file reading/writing — NotesView just calls it
     private final NotesManager notesManager = new NotesManager();
 
@@ -59,7 +66,7 @@ public class NotesView {
 
         // Build the three sections
         HBox titleBar = buildTitleBar();
-        VBox dropZone  = buildDropZone();
+        VBox dropZone = buildDropZone();
         notesList = new VBox(8); // 8px gap between note cards
         refreshNotesList();      // populate with any existing notes
 
@@ -70,7 +77,7 @@ public class NotesView {
         // Remove the default white background of the scroll pane
         scroll.setStyle("-fx-background: #1E1E2E; -fx-background-color: #1E1E2E;");
 
-        root.getChildren().addAll(titleBar, dropZone, scroll);
+        root.getChildren().addAll(titleBar, dropZone, scroll, buildSubmitButton());
 
         // --- Make the window draggable by the title bar ---
         // We store the offset between the mouse position and the window's top-left
@@ -92,7 +99,7 @@ public class NotesView {
 
     /**
      * Builds the title bar: "Notes" label on the left, "✕" close button on the right.
-     *
+     * <p>
      * HBox.setHgrow(header, Priority.ALWAYS) makes the header label expand to fill
      * all available horizontal space, which pushes the close button to the far right.
      */
@@ -111,24 +118,145 @@ public class NotesView {
         HBox.setHgrow(header, Priority.ALWAYS); // header takes all available space
         bar.getChildren().add(close);
         bar.setAlignment(Pos.CENTER_LEFT);
+        bar.setSpacing(12);
         bar.setStyle("-fx-cursor: move;"); // show a move cursor so user knows it's draggable
         return bar;
     }
 
+    private Button buildSubmitButton() {
+        Button submitBtn = new Button("Submit");
+        submitBtn.setMaxWidth(Double.MAX_VALUE); // stretch to fill the full width
+        submitBtn.setStyle(
+                "-fx-padding: 12px;" +
+                        "-fx-background-color: #6C63FF; -fx-text-fill: white; " +
+                        "-fx-font-weight: bold; -fx-background-radius: 8; -fx-cursor: hand;"
+        );
+        submitBtn.setOnAction(e -> submitAllNotes());
+        return submitBtn;
+    }
+
+    /**
+     * Entry point for the submit flow.
+     *
+     * Collects all log entries across all notes into two parallel lists:
+     *   entries — the LogEntry objects to process
+     *   dates   — the work date for each entry (parsed from its note's "Date:" line)
+     *
+     * Parallel lists keep the code simple: processEntryAt only needs one index
+     * to look up both the entry and its date.
+     */
+    private void submitAllNotes() {
+        List<Note> notes = notesManager.loadNotes();
+
+        List<LogEntry> entries = new ArrayList<>();
+        List<LocalDate> dates  = new ArrayList<>();
+
+        for (Note note : notes) {
+            LocalDate date = note.getLoggedDate().orElse(LocalDate.now());
+            for (LogEntry entry : note.getLogEntries()) {
+                entries.add(entry);
+                dates.add(date);
+            }
+        }
+
+        if (entries.isEmpty()) return;
+
+        LoggingProgressView progressView = new LoggingProgressView();
+
+        // On full success: write the worklog, wipe the note files, refresh the list, close the window
+        progressView.setOnSuccess(() -> new Thread(() -> {
+            try {
+                notesManager.writeWorklog(notes);
+                notesManager.deleteAllNotes();
+            } catch (IOException ex) {
+                ex.printStackTrace();
+            }
+            Platform.runLater(() -> {
+                refreshNotesList();
+                stageHelper.close();
+            });
+        }).start());
+
+        progressView.show(entries);
+
+        processEntryAt(new JiraClient(), entries, dates, 0, progressView);
+    }
+
+    /**
+     * Recursively processes one entry at a time, advancing to index + 1 when done.
+     *
+     * For each entry:
+     *   1. Mark it RUNNING in the progress view
+     *   2. Fetch its subtasks on a background thread (keeps UI responsive)
+     *   3a. 0 or 1 subtask → log automatically, mark SUCCESS or ERROR
+     *   3b. 2+ subtasks     → show the picker; mark SUCCESS when it closes
+     */
+    private void processEntryAt(JiraClient client, List<LogEntry> entries,
+                                 List<LocalDate> dates, int index, LoggingProgressView view) {
+        if (index >= entries.size()) {
+            view.markAllDone();
+            return;
+        }
+
+        LogEntry entry   = entries.get(index);
+        LocalDate date   = dates.get(index);
+        String baseUrl   = JiraClient.extractBaseUrl(entry.url());
+        String key       = JiraClient.extractKey(entry.url());
+        int currentIndex = index;
+
+        view.markRunning(currentIndex);
+
+        Runnable next = () -> processEntryAt(client, entries, dates, currentIndex + 1, view);
+
+        new Thread(() -> {
+            try {
+                List<JiraIssue> subtasks = client.fetchSubtasks(key, baseUrl);
+
+                Platform.runLater(() -> {
+                    if (subtasks.size() > 1) {
+                        // Multiple choices — let the user pick, then mark success
+                        new SubtaskPickerView(entry, subtasks, date, client, () -> {
+                            view.markSuccess(currentIndex);
+                            next.run();
+                        }).show();
+                    } else {
+                        // Single subtask or none — log silently in the background
+                        String targetKey = subtasks.isEmpty() ? key : subtasks.get(0).key();
+                        new Thread(() -> {
+                            try {
+                                client.logWork(targetKey, baseUrl, date,
+                                        entry.timeRange().start(), entry.timeRange().end(),
+                                        entry.description());
+                                view.markSuccess(currentIndex);
+                            } catch (Exception ex) {
+                                view.markError(currentIndex, ex.getMessage());
+                            } finally {
+                                Platform.runLater(next);
+                            }
+                        }).start();
+                    }
+                });
+            } catch (Exception ex) {
+                view.markError(currentIndex, ex.getMessage());
+                Platform.runLater(next);
+            }
+        }).start();
+    }
+
     /**
      * Builds the drag-and-drop zone — the dashed rectangle that accepts file drops.
-     *
+     * <p>
      * JavaFX drag-and-drop requires three event handlers:
-     *
-     *   setOnDragOver    — fires continuously as the user drags something over this node.
-     *                      We MUST call e.acceptTransferModes() here to signal that we'll
-     *                      accept the drop. Without this, the drop will be rejected.
-     *
-     *   setOnDragExited  — fires when the drag leaves the node. Used to reset the visual.
-     *
-     *   setOnDragDropped — fires when the user releases the mouse to drop the files.
-     *                      e.getDragboard().getFiles() gives us the list of dropped files.
-     *                      We MUST call e.setDropCompleted(true) at the end.
+     * <p>
+     * setOnDragOver    — fires continuously as the user drags something over this node.
+     * We MUST call e.acceptTransferModes() here to signal that we'll
+     * accept the drop. Without this, the drop will be rejected.
+     * <p>
+     * setOnDragExited  — fires when the drag leaves the node. Used to reset the visual.
+     * <p>
+     * setOnDragDropped — fires when the user releases the mouse to drop the files.
+     * e.getDragboard().getFiles() gives us the list of dropped files.
+     * We MUST call e.setDropCompleted(true) at the end.
      */
     private VBox buildDropZone() {
         VBox zone = new VBox(8);
@@ -204,7 +332,7 @@ public class NotesView {
 
     /**
      * Builds a single note card: filename and date on the left, delete button on the right.
-     *
+     * <p>
      * HBox.setHgrow(info, Priority.ALWAYS) makes the info section expand to fill
      * the card, which pushes the delete button to the far right.
      */
@@ -250,15 +378,15 @@ public class NotesView {
      * Returns the CSS style string for the drop zone.
      * `active=true` = user is hovering with a file (highlight the border).
      * `active=false` = normal state (subtle border).
-     *
+     * <p>
      * String.format() works like a template: %s is replaced by the string arguments.
      */
     private String dropZoneStyle(boolean active) {
         return String.format(
-            "-fx-border-color: %s; -fx-border-width: 2; -fx-border-style: dashed; " +
-            "-fx-background-color: %s; -fx-border-radius: 10; -fx-background-radius: 10;",
-            active ? "#6C63FF" : "#444444", // purple border when active, grey when not
-            active ? "#2A2A4E" : "#2A2A3E"  // slightly lighter background when active
+                "-fx-border-color: %s; -fx-border-width: 2; -fx-border-style: dashed; " +
+                        "-fx-background-color: %s; -fx-border-radius: 10; -fx-background-radius: 10;",
+                active ? "#6C63FF" : "#444444", // purple border when active, grey when not
+                active ? "#2A2A4E" : "#2A2A3E"  // slightly lighter background when active
         );
     }
 }

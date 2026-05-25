@@ -31,11 +31,10 @@ public class MainFloatingSphere {
         this.animationHelper = new AnimationHelper();
         this.sphereHelper = new SphereHelper();
 
-        this.bubblesLeaves = sphereHelper.buildBubbleLeaves(List.of(
-                new BubbleDef("Notes", 135.0, "#FF6B6B")
-//          new BubbleDef("Timer",    90.0,  "#FFD93D"),
-//          new BubbleDef("Settings", 180.0, "#6BCB77")
-        ));
+        onBuildMainSphere();
+
+        this.bubblesLeaves = onBuildLeaveBubbles();
+        bubblesLeaves.forEach(b -> paneHelper.addChildren(b, b.getText()));
     }
 
     public void show() {
@@ -45,13 +44,34 @@ public class MainFloatingSphere {
 
         this.paneHelper
                 .setPrefSize(PaneHelper.PANEL_SIZE, PaneHelper.PANEL_SIZE)
-                .setStyle("-fx-background-color: red;");
+                .setStyle("-fx-background-color: red;"); // Should be transparent in production
 
-        bubblesLeaves.forEach(b -> paneHelper.addChildren(b, b.getText()));
+        // Scene on the pane
+        Scene scene = new Scene(paneHelper.getPane(), PaneHelper.PANEL_SIZE, PaneHelper.PANEL_SIZE);
+        scene.setFill(Color.TRANSPARENT);
 
+        Rectangle2D screen = Screen.getPrimary().getVisualBounds();
+        this.stageHelper
+                .setPosition(screen.getMaxX() - PaneHelper.PANEL_SIZE - 20, screen.getMaxY() - PaneHelper.PANEL_SIZE - 20)
+                .setScene(scene)
+                .show();
+    }
+
+    private void toggleMenu() {
+        menuOpen = !menuOpen;
+        for (int i = 0; i < bubblesLeaves.size(); i++) {
+            animationHelper.animateBubble(bubblesLeaves.get(i), menuOpen, i * 60);
+        }
+    }
+
+    /**
+     * Method to initialize the Main Sphere
+     */
+    private void onBuildMainSphere() {
+        // Main sphere circle
         Circle sphere = sphereHelper.buildMainSphere();
-        paneHelper.addChildren(sphere);
 
+        // Adding mouse events to the main sphere
         sphere.setOnMousePressed(e -> {
             dragOffsetX = e.getScreenX() - stageHelper.getX();
             dragOffsetY = e.getScreenY() - stageHelper.getY();
@@ -68,20 +88,19 @@ public class MainFloatingSphere {
             if (!dragging) toggleMenu();
         });
 
-        Scene scene = new Scene(paneHelper.getPane(), PaneHelper.PANEL_SIZE, PaneHelper.PANEL_SIZE);
-        scene.setFill(Color.TRANSPARENT);
-
-        Rectangle2D screen = Screen.getPrimary().getVisualBounds();
-        this.stageHelper
-                .setPosition(screen.getMaxX() - PaneHelper.PANEL_SIZE - 20, screen.getMaxY() - PaneHelper.PANEL_SIZE - 20)
-                .setScene(scene)
-                .show();
+        paneHelper.addChildren(sphere);
     }
 
-    private void toggleMenu() {
-        menuOpen = !menuOpen;
-        for (int i = 0; i < bubblesLeaves.size(); i++) {
-            animationHelper.animateBubble(bubblesLeaves.get(i), menuOpen, i * 60);
-        }
+    /**
+     * Method that uses a list to create leave bubbles
+     *
+     * @return List<BubbleItem>
+     */
+    private List<BubbleItem> onBuildLeaveBubbles() {
+        return sphereHelper.buildBubbleLeaves(List.of(
+                new BubbleDef("Notes", 135.0, "#FF6B6B")
+//          new BubbleDef("Timer",    90.0,  "#FFD93D"),
+//          new BubbleDef("Settings", 180.0, "#6BCB77")
+        ));
     }
 }

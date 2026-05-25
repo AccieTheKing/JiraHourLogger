@@ -1,6 +1,5 @@
 package com.jirahourlogger.ui;
 
-import javafx.scene.control.Label;
 import javafx.scene.effect.DropShadow;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
@@ -8,11 +7,10 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.scene.text.Text;
 
-import java.util.function.Function;
 
 public class BubbleItem extends Circle {
     private static final double BUBBLE_RADIUS = 22;
-    private Text text;
+    private final Text text;
 
     public BubbleItem(double cx, double cy, String label, String color) {
         this.setCenterX(cx);          // tell the circle where it is
@@ -36,7 +34,6 @@ public class BubbleItem extends Circle {
 
         if (label.equals("Notes")) {
             this.setOnMouseClicked((e) -> {
-//                toggleMenu();
                 new NotesView().show();
             });
         }

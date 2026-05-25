@@ -8,6 +8,13 @@ import javafx.scene.shape.Circle;
 
 import java.util.List;
 
+/**
+ * This is a helper class that helps with the creation of Sphere formed objects,
+ * now it's mainly Circles.
+ *
+ * @author Acdaling Edusei
+ * @date 25-05-2026
+ */
 public class SphereHelper {
     public static final double SPHERE_RADIUS = 28;
     public static final double MARGIN = 15;
@@ -35,16 +42,5 @@ public class SphereHelper {
             double by = SPHERE_Y_POS - Math.sin(rad) * DISTANCE;
             return new BubbleItem(bx, by, def.label(), def.color());
         }).toList();
-    }
-
-    public static Circle buildBubbleCircle(double cx, double cy, double radius, String color) {
-        Circle c = new Circle(cx, cy, radius);
-        c.setFill(Color.web(color));
-        c.setOpacity(0);
-        c.setScaleX(0);
-        c.setScaleY(0);
-        c.setEffect(new DropShadow(10, Color.web("#00000055")));
-        c.setStyle("-fx-cursor: hand;");
-        return c;
     }
 }

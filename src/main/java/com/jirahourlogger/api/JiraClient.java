@@ -22,17 +22,17 @@ import java.util.Map;
 
 /**
  * JiraClient handles all communication with the Jira REST API.
- *
+ * <p>
  * Authentication uses HTTP Basic Auth — Jira expects:
- *   Authorization: Basic Base64(email:apiToken)
- *
+ * Authorization: Basic Base64(email:apiToken)
+ * <p>
  * Credentials are loaded from ~/.jirahourlogger/.env, with system
  * environment variables taking priority if both are present.
- *
+ * <p>
  * The .env file format (one KEY=VALUE per line, # for comments):
- *   JIRA_EMAIL=you@company.com
- *   JIRA_API_TOKEN=yourtoken
- *
+ * JIRA_EMAIL=you@company.com
+ * JIRA_API_TOKEN=yourtoken
+ * <p>
  * Java 21's built-in java.net.http.HttpClient is used — no external library needed.
  * Gson is used to parse the JSON responses from the API.
  */
@@ -52,7 +52,7 @@ public class JiraClient {
     private final HttpClient http = HttpClient.newHttpClient();
 
     public JiraClient() {
-        String email    = requireEnv("JIRA_EMAIL");
+        String email = requireEnv("JIRA_EMAIL");
         String apiToken = requireEnv("JIRA_API_TOKEN");
         // Encode "email:token" as Base64 for the Basic Auth header
         String credentials = email + ":" + apiToken;
@@ -89,7 +89,7 @@ public class JiraClient {
     /**
      * Fetches the subtasks of the given issue and returns them as a list of JiraIssue records.
      * Returns an empty list if the issue has no subtasks.
-     *
+     * <p>
      * API used: GET /rest/api/3/issue/{key}?fields=subtasks
      */
     public List<JiraIssue> fetchSubtasks(String issueKey, String baseUrl) throws Exception {
@@ -109,15 +109,15 @@ public class JiraClient {
         }
 
         // Parse: { "fields": { "subtasks": [ { "key": "...", "self": "...", "fields": { "summary": "..." } } ] } }
-        JsonObject root      = JsonParser.parseString(response.body()).getAsJsonObject();
-        JsonArray  subtasks  = root.getAsJsonObject("fields").getAsJsonArray("subtasks");
+        JsonObject root = JsonParser.parseString(response.body()).getAsJsonObject();
+        JsonArray subtasks = root.getAsJsonObject("fields").getAsJsonArray("subtasks");
 
         List<JiraIssue> result = new ArrayList<>();
         for (var element : subtasks) {
-            JsonObject subtask  = element.getAsJsonObject();
-            String key          = subtask.get("key").getAsString();
-            String self         = subtask.get("self").getAsString();
-            String summary      = subtask.getAsJsonObject("fields").get("summary").getAsString();
+            JsonObject subtask = element.getAsJsonObject();
+            String key = subtask.get("key").getAsString();
+            String self = subtask.get("self").getAsString();
+            String summary = subtask.getAsJsonObject("fields").get("summary").getAsString();
             result.add(new JiraIssue(key, summary, self));
         }
         return result;
@@ -125,10 +125,10 @@ public class JiraClient {
 
     /**
      * Posts a worklog entry to the given issue in Jira.
-     *
+     * <p>
      * The duration is calculated from start to end (e.g. 09:00 → 11:00 = 7200 seconds).
      * The "started" timestamp combines the note's date with the start time, in UTC.
-     *
+     * <p>
      * API used: POST /rest/api/3/issue/{key}/worklog
      */
     public void logWork(String issueKey, String baseUrl,
@@ -192,9 +192,9 @@ public class JiraClient {
 
     /**
      * Looks up a credential value. Priority order:
-     *   1. System environment variable (set via `export KEY=value` in the shell)
-     *   2. ~/.jirahourlogger/.env file
-     *
+     * 1. System environment variable (set via `export KEY=value` in the shell)
+     * 2. ~/.jirahourlogger/.env file
+     * <p>
      * Throws a clear error if the key is missing from both sources.
      */
     private static String requireEnv(String name) {
@@ -208,17 +208,17 @@ public class JiraClient {
 
         throw new IllegalStateException(
                 "Missing credential: " + name + ". " +
-                "Add it to " + ENV_FILE + ":\n  " + name + "=yourvalue"
+                        "Add it to " + ENV_FILE + ":\n  " + name + "=yourvalue"
         );
     }
 
     /**
      * Parses ~/.jirahourlogger/.env into a Map<String, String>.
-     *
+     * <p>
      * Each line is expected to be KEY=VALUE.
      * Lines starting with # and blank lines are ignored.
      * If the file doesn't exist yet, an empty map is returned silently.
-     *
+     * <p>
      * static initializer: this method runs once when the class is loaded,
      * before any constructor is called. The result is stored in ENV_VALUES.
      */
@@ -234,7 +234,7 @@ public class JiraClient {
                 int separator = trimmed.indexOf('=');
                 if (separator <= 0) continue; // skip malformed lines
 
-                String key   = trimmed.substring(0, separator).trim();
+                String key = trimmed.substring(0, separator).trim();
                 String value = trimmed.substring(separator + 1).trim();
                 values.put(key, value);
             }
